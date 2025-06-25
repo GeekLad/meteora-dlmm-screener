@@ -1,0 +1,3 @@
+[tool.dagster]
+module_name = "definitions"
+code_location_name = "meteora_dlmm_screener_data_pipeline"

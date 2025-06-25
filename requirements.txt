@@ -1,0 +1,10 @@
+pydantic
+httpx
+pandas
+dagster
+dagster-duckdb
+dagster-webserver
+
+# Dependencies for testing
+pytest
+pytest-asyncio
