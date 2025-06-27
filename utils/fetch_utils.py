@@ -33,9 +33,16 @@ async def fetch_page(
                 logger.debug(f"Raw response from {url}:\n{data}")
             break  # Exit retry loop on successful HTTP response
         except httpx.HTTPStatusError as e:
-            logger.warning(
-                f"Attempt {attempt + 1} failed for {url} with params {params} due to 429 Too Many Requests. Retrying in {delay:.2f} seconds."
-            )
+            if e.response is not None and e.response.status_code == 429:
+                logger.warning(
+                    f"Attempt {attempt + 1} failed for {url} with params {params} due to 429 Too Many Requests. Retrying in {delay:.2f} seconds."
+                )
+            else:
+                status_code = e.response.status_code if e.response is not None else 'Unknown'
+                reason = e.response.reason_phrase if e.response is not None and hasattr(e.response, 'reason_phrase') else str(e)
+                logger.warning(
+                    f"Attempt {attempt + 1} failed for {url} with params {params} due to HTTP {status_code}: {reason}. Retrying in {delay:.2f} seconds."
+                )
             if attempt == retries - 1:
                 logger.error(f"Failed to fetch {url} after {retries} attempts.")
                 raise

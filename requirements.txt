@@ -4,6 +4,7 @@ pandas
 dagster
 dagster-duckdb
 dagster-webserver
+dagster-duckdb-pandas
 
 # Dependencies for testing
 pytest

@@ -1,13 +1,12 @@
 import dagster as dg
-import pandas as pd
-from meteora_dlmm_screener_data_pipeline.assets.apis.meteora_dlmm_api import meteora_dlmm_api
+from typing import List
 
 @dg.asset(
-    description="Archive the DLMM API data in a parquet file.",
+    description="Archive the returned API data in a jsonl.gz file.",
     group_name="archive_data",
-    deps=[meteora_dlmm_api],
-    io_manager_key="archive_parquet_io_manager",
+    io_manager_key="archive_json_io_manager",
     freshness_policy=dg.FreshnessPolicy(maximum_lag_minutes=1),
+    automation_condition=dg.AutomationCondition.eager(),
 )
-async def archive_dlmm_api_data(meteora_dlmm_api: pd.DataFrame) -> pd.DataFrame:
-    return meteora_dlmm_api
+async def archive_dlmm_api_data(meteora_dlmm_api_raw: List[str]) -> List[str]:
+    return meteora_dlmm_api_raw

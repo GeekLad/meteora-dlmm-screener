@@ -1,6 +1,6 @@
 from io import StringIO
 import json
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import pandas as pd
 from pydantic import BaseModel
 import dagster as dg
@@ -53,17 +53,26 @@ class MeteoraDlmmApiResponse(BaseModel):
     pairs: List[DlmmPair]
     total: int
 
-@dg.asset(
-    description="Download DLMM pairs from Meteora API as pandas dataframe.",
+@dg.multi_asset(
     group_name="api_ingestion",
-    freshness_policy=dg.FreshnessPolicy(maximum_lag_minutes=1),
+    outs={
+        "meteora_dlmm_api_raw": dg.AssetOut(
+            description="Raw JSON string from the Meteora DLMM API.",
+            freshness_policy=dg.FreshnessPolicy(maximum_lag_minutes=1),
+        ),
+        "meteora_dlmm_api": dg.AssetOut(
+            description="Dataframe with data from the Meteora DLMM API.",
+            freshness_policy=dg.FreshnessPolicy(maximum_lag_minutes=1),
+        ),
+    }
 )
-async def meteora_dlmm_api(context: dg.AssetExecutionContext) -> pd.DataFrame:
+async def read_meteora_dlmm_api(context: dg.AssetExecutionContext) -> Tuple[List[str], pd.DataFrame]:
     url = "https://dlmm-api.meteora.ag/pair/all_with_pagination"
     concurrency = 30
     retries = 10
     backoff_factor = 0.5
-    all_pairs = []
+    df = None
+    pages = []
     page = 0
     while True:
         # Prepare requests for concurrent fetching
@@ -78,47 +87,43 @@ async def meteora_dlmm_api(context: dg.AssetExecutionContext) -> pd.DataFrame:
         # Fetch pages concurrently
         responses = await fetch_pages(
             requests, 
-            read_json=True, 
+            read_json=False, 
             concurrency=concurrency, 
             retries=retries, 
             backoff_factor=backoff_factor
         )
 
         # Combine the pairs from all responses
-        page_pairs = []
         for resp in responses:
-            if hasattr(resp, 'pairs'):
-                page_pairs.extend(resp.pairs)
-        if not page_pairs:
-            break
-        all_pairs.extend(page_pairs)
+            json_data = json.loads(resp)
+            new_df = pd.read_json(StringIO(json.dumps(json_data["pairs"])))
+            df = pd.concat([df, new_df], ignore_index=True) if df is not None else new_df
+            pages.append(resp)
         
-        # Check if the last pair in the last response has volume.min_30 <= 0
-        last_pair = page_pairs[-1]
-       
-        # If the last pair's volume.min_30 is 0, stop fetching more pages
-        if getattr(getattr(last_pair, 'volume', None), 'min_30', 1) == 0:
+        # Check if the last pair in the df has volume.hour_24 <= 0
+        last_row_volume_hour_24 = df.iloc[-1]["volume"]["hour_24"]
+        if last_row_volume_hour_24 == 0:
             break
+        
         page += concurrency
     
-    # Create a DataFrame from the list of DlmmPair objects
-    pairs_list = [pair.model_dump() for pair in all_pairs]
-    json_string = json.dumps(pairs_list)
-    pairs_df = pd.read_json(StringIO(json_string))
-
-    # Filter pairs with non-zero volume.min_30 and convert to DataFrame
-    pairs_df = pairs_df[pairs_df["volume"].apply(lambda x: x["min_30"] > 0)]
-    
-    # Drop duplicates based on address
-    pairs_df = pairs_df.drop_duplicates(subset=["address"])
+    # Filter pairs with non-zero volume.hour_24
+    df = df[df["volume"].apply(lambda x: x["hour_24"] > 0)]
     
     # Add created_at column with current unix timestamp
-    pairs_df["created_at"] = int(time.time())
+    df["created_at"] = int(time.time())
 
     context.add_output_metadata(
         {
-            "num_pairs_with_volume": len(pairs_df),
-        }
+            "num_pages_read": len(pages),
+        },
+        output_name="meteora_dlmm_api_raw"
+    )
+    context.add_output_metadata(
+        {
+            "num_pairs_with_volume": len(df),
+        },
+        output_name="meteora_dlmm_api_raw"
     )
 
-    return pairs_df
+    return pages, df
