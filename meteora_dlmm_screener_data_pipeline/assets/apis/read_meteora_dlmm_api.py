@@ -113,6 +113,9 @@ async def read_meteora_dlmm_api(context: dg.AssetExecutionContext) -> Tuple[List
     # Add created_at column with current unix timestamp
     df["created_at"] = int(time.time())
 
+    # Remove duplicate addresses
+    df = df.drop_duplicates(subset=["address"], keep="first")
+
     context.add_output_metadata(
         {
             "num_pages_read": len(pages),
